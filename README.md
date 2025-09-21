@@ -1,4 +1,4 @@
-Timely Worlds (Working Title)
+Timely Worlds
 
 This repo explores depth-bounded predictive branching over incremental views using Timely Dataflow and Differential Dataflow. The core idea: maintain a base world view W from streaming (or sequential) events, branch predicted futures W'..W^D as lightweight scenario overlays, and let users subscribe to whether a condition becomes true in any scenario within a bounded depth and probability threshold.
 
@@ -23,4 +23,3 @@ Naming
 
 License
 - To be decided.
-
