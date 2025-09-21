@@ -33,8 +33,9 @@ Reporting
 
 Collection Workflow
 1. Run the demos with desired parameters (`scripts/run_retail_demo.sh --help`, `scripts/run_mfg_demo.sh --help`) and redirect stdout to JSONL.
-2. Use `jq` or a Python notebook to filter lines whose `metrics_json` payload has `label` (`retail_epoch`, `mfg_epoch`, etc.) and compute aggregates.
-3. Sweep beam width (K), max depth (D), branch probability, and workload size using CLI flags; chart latency/throughput vs. configuration.
+2. Summarize metrics with `scripts/summarize_metrics.py retail_metrics.jsonl --pretty` (supports multiple files and stdin).
+3. Use `jq`/Python notebooks for deeper analysis: filter by `label` (`retail_epoch`, `mfg_epoch`, etc.) and compute aggregates such as throughput, alert counts, and scenario churn.
+4. Sweep beam width (K), max depth (D), branch probability, and workload size using CLI flags; chart latency/throughput vs. configuration.
 
 Targets (MVP)
 - Sub‑second p95 per update at moderate rates (O(1–5K)/s) on a single machine.
