@@ -161,6 +161,10 @@ impl RetailScenarioManager {
             .collect()
     }
 
+    pub fn active_len(&self) -> usize {
+        self.active.len()
+    }
+
     fn predict_delta(&self, order: &OrderPlaced) -> i64 {
         let mut delta = self.predictor.predict_delta(order);
         if (self.cfg.delta_multiplier - 1.0).abs() > f64::EPSILON {

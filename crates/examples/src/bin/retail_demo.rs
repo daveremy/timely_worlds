@@ -1,6 +1,7 @@
 use anyhow::Result;
 use tracing::info;
 use tw_runtime::{init_tracing, start_runtime};
+use tw_runtime::metrics::{EpochTimer, MetricsRegistry};
 
 use differential_dataflow::input::InputSession;
 use differential_dataflow::operators::reduce::Reduce;
@@ -30,9 +31,11 @@ fn main() -> Result<()> {
 
         let predictor = Arc::new(SpendGrowthPredictor::default());
         let mut scenario_manager = RetailScenarioManager::new(RetailBeamConfig::default(), predictor);
+        let metrics = MetricsRegistry::default();
 
         // Build dataflow: per-customer totals and global top-K
         const TOP_K: usize = 5;
+        let metrics_for_dataflow = metrics.clone();
         worker.dataflow::<u64, _, _>(|scope| {
             let orders = input.to_collection(scope);
 
@@ -139,8 +142,12 @@ fn main() -> Result<()> {
                 .filter(move |(_sid, ((_cust, _sum), prob))| *prob >= p_min)
                 .map(|(sid, ((cust, sum), prob))| (sid, cust, sum, prob));
 
+            let metrics_alerts = metrics_for_dataflow.clone();
             alerts
-                .inspect(|a| info!(?a, "ALERT: target customer in top-K within scenario"))
+                .inspect(move |a| {
+                    metrics_alerts.inc_scenario_alerts(1);
+                    info!(?a, "ALERT: target customer in top-K within scenario");
+                })
                 .probe_with(&mut probe);
         });
 
@@ -148,6 +155,8 @@ fn main() -> Result<()> {
         let mut epoch: u64 = 0;
         let customers = 50u64;
         for batch in 0..10u64 {
+            let epoch_timer = EpochTimer::start();
+            let completed_epoch = epoch;
             for i in 0..200u64 {
                 // Spread spend across customers with some skew
                 let cust = (batch * 13 + i * 7) % customers;
@@ -161,6 +170,13 @@ fn main() -> Result<()> {
                     ts_ms: epoch * 1000,
                 };
                 let outcome = scenario_manager.expand_order(&order);
+                metrics.inc_scenario_created(outcome.created.len() as u64);
+                metrics.inc_scenario_retired(outcome.retired.len() as u64);
+                let overlay_changes = outcome.overlays_added.len() + outcome.overlays_removed.len();
+                if overlay_changes > 0 {
+                    metrics.inc_predicted_events(overlay_changes as u64);
+                }
+                metrics.record_active_peak(scenario_manager.active_len() as u64);
                 let env = EventEnvelope {
                     meta: EventMeta {
                         domain: "retail".to_string(),
@@ -172,6 +188,7 @@ fn main() -> Result<()> {
                     payload: order,
                 };
                 input.insert(env);
+                metrics.inc_base_events(1);
 
                 for meta in &outcome.created {
                     scen_weight_input.insert((meta.id, meta.weight.0));
@@ -200,6 +217,21 @@ fn main() -> Result<()> {
             while probe.less_than(input.time()) {
                 worker.step();
             }
+            let elapsed = epoch_timer.elapsed();
+            let snapshot = metrics.snapshot();
+            info!(
+                epoch = completed_epoch,
+                duration_ms = elapsed.as_millis(),
+                base_events = snapshot.base_events,
+                predicted_events = snapshot.predicted_events,
+                scenarios_created = snapshot.scenario_created,
+                scenarios_retired = snapshot.scenario_retired,
+                alerts = snapshot.scenario_alerts,
+                active_peak = snapshot.scenario_active_peak,
+                "epoch complete"
+            );
         }
+        let final_snapshot = metrics.snapshot();
+        info!(?final_snapshot, "final metrics summary");
     })
 }

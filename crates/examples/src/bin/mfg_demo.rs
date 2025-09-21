@@ -1,6 +1,7 @@
 use anyhow::Result;
 use tracing::info;
 use tw_runtime::{init_tracing, start_runtime};
+use tw_runtime::metrics::{EpochTimer, MetricsRegistry};
 
 use differential_dataflow::input::InputSession;
 use differential_dataflow::operators::reduce::Reduce;
@@ -39,8 +40,10 @@ fn main() -> Result<()> {
             ManufacturingBeamConfig::default(),
             predictor,
         );
+        let metrics = MetricsRegistry::default();
 
         const TOP_K: usize = 3;
+        let metrics_for_dataflow = metrics.clone();
         worker.dataflow::<u64, _, _>(|scope| {
             let events = input.to_collection(scope);
 
@@ -134,7 +137,12 @@ fn main() -> Result<()> {
                 .filter(move |(_sid, ((machine, sum), prob))| *sum >= target_threshold && *prob >= 0.3)
                 .map(|(sid, ((machine, sum), prob))| (sid, machine, sum, prob));
 
-            alerts.inspect(|alert| info!(?alert, "ALERT: machine backlog risk"))
+            let metrics_alerts = metrics_for_dataflow.clone();
+            alerts
+                .inspect(move |alert| {
+                    metrics_alerts.inc_scenario_alerts(1);
+                    info!(?alert, "ALERT: machine backlog risk");
+                })
                 .probe_with(&mut probe);
         });
 
@@ -145,6 +153,8 @@ fn main() -> Result<()> {
         let mut active_jobs: Vec<ActiveJob> = Vec::new();
 
         for batch in 0..12u64 {
+            let epoch_timer = EpochTimer::start();
+            let completed_epoch = epoch;
             for i in 0..120u64 {
                 job_counter += 1;
                 let machine = (batch * 5 + i * 11) % machines;
@@ -158,6 +168,13 @@ fn main() -> Result<()> {
                 };
 
                 let outcome = scenario_manager.expand_operation(&op);
+                metrics.inc_scenario_created(outcome.created.len() as u64);
+                metrics.inc_scenario_retired(outcome.retired.len() as u64);
+                let overlay_changes = outcome.overlays_added.len() + outcome.overlays_removed.len();
+                if overlay_changes > 0 {
+                    metrics.inc_predicted_events(overlay_changes as u64);
+                }
+                metrics.record_active_peak(scenario_manager.active_len() as u64);
                 for meta in &outcome.created {
                     scen_weight_input.insert((meta.id, meta.weight.0));
                 }
@@ -186,6 +203,7 @@ fn main() -> Result<()> {
                     payload: ManufacturingEvent::OperationStart(op.clone()),
                 };
                 input.insert(env);
+                metrics.inc_base_events(1);
 
                 let ready_epoch = epoch + 1 + (machine % 3);
                 active_jobs.push(ActiveJob {
@@ -224,6 +242,7 @@ fn main() -> Result<()> {
                     payload: ManufacturingEvent::OperationComplete(complete),
                 };
                 input.insert(env);
+                metrics.inc_base_events(1);
             }
 
             epoch += 1;
@@ -237,6 +256,21 @@ fn main() -> Result<()> {
             while probe.less_than(input.time()) {
                 worker.step();
             }
+            let elapsed = epoch_timer.elapsed();
+            let snapshot = metrics.snapshot();
+            info!(
+                epoch = completed_epoch,
+                duration_ms = elapsed.as_millis(),
+                base_events = snapshot.base_events,
+                predicted_events = snapshot.predicted_events,
+                scenarios_created = snapshot.scenario_created,
+                scenarios_retired = snapshot.scenario_retired,
+                alerts = snapshot.scenario_alerts,
+                active_peak = snapshot.scenario_active_peak,
+                "epoch complete"
+            );
         }
+        let final_snapshot = metrics.snapshot();
+        info!(?final_snapshot, "final metrics summary");
     })
 }

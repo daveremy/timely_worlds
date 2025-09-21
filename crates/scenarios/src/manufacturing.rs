@@ -161,6 +161,10 @@ impl ManufacturingScenarioManager {
             .collect()
     }
 
+    pub fn active_len(&self) -> usize {
+        self.active.len()
+    }
+
     fn predict_delta(&self, op: &OperationStart) -> i64 {
         let mut delta = self.predictor.predict_backlog(op);
         if (self.cfg.delta_multiplier - 1.0).abs() > f64::EPSILON {
