@@ -219,19 +219,11 @@ fn main() -> Result<()> {
             }
             let elapsed = epoch_timer.elapsed();
             let snapshot = metrics.snapshot();
-            info!(
-                epoch = completed_epoch,
-                duration_ms = elapsed.as_millis(),
-                base_events = snapshot.base_events,
-                predicted_events = snapshot.predicted_events,
-                scenarios_created = snapshot.scenario_created,
-                scenarios_retired = snapshot.scenario_retired,
-                alerts = snapshot.scenario_alerts,
-                active_peak = snapshot.scenario_active_peak,
-                "epoch complete"
-            );
+            let json = snapshot.to_json_line("retail_epoch", Some(elapsed));
+            info!(epoch = completed_epoch, %json, "epoch complete");
         }
         let final_snapshot = metrics.snapshot();
-        info!(?final_snapshot, "final metrics summary");
+        let json = final_snapshot.to_json_line("retail_final", None);
+        info!(%json, "final metrics summary");
     })
 }

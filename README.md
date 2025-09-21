@@ -10,6 +10,11 @@ Status
 Docs
 - See `docs/README.md` for the index and navigation.
 
+Running Demos
+- Retail: `scripts/run_retail_demo.sh > retail_metrics.jsonl`
+- Manufacturing: `scripts/run_mfg_demo.sh > mfg_metrics.jsonl`
+- Logs contain JSON lines (`metrics_json`) per epoch plus a final summary for evaluation.
+
 Workspace Layout
 - `crates/core`: core types and traits (events, diffs, ids)
 - `crates/runtime`: timely/differential wiring and runtime helpers

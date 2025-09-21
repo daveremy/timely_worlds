@@ -26,11 +26,16 @@ Experiments
    - Increase number/complexity of subscriptions; measure incremental cost.
 
 Reporting
-- Plots of latency/throughput vs K, D.
-- Memory vs active scenarios and time.
-- Alert precision/recall over runs.
+- JSONL metrics emitted per epoch (label `retail_epoch`, `mfg_epoch`) and final summary lines (`retail_final`, `mfg_final`).
+- Parse fields: `base_events`, `predicted_events`, `scenario_created`, `scenario_retired`, `scenario_alerts`, `scenario_active_peak`, `elapsed_ms`.
+- Aggregate into plots of latency/throughput vs K, D; memory instrumentation TBD.
+- Alert precision/recall over runs (requires synthetic truth logs).
+
+Collection Workflow
+1. Run the demo with desired parameters (see `scripts/run_retail_demo.sh`, `scripts/run_mfg_demo.sh` once added) and capture stdout to a JSONL file.
+2. Use `jq` or a Python notebook to filter on `metrics_json` logs and compute aggregates.
+3. Repeat for varying beam width (K) and depth (D), then chart metrics.
 
 Targets (MVP)
 - Sub‑second p95 per update at moderate rates (O(1–5K)/s) on a single machine.
 - Depth D up to 10 with K up to 100 under GB‑scale memory.
-

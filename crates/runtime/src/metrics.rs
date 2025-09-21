@@ -2,6 +2,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
+
 #[derive(Clone, Default)]
 pub struct MetricsRegistry {
     inner: Arc<MetricsInner>,
@@ -56,7 +58,7 @@ impl MetricsRegistry {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 pub struct MetricsSnapshot {
     pub base_events: u64,
     pub predicted_events: u64,
@@ -64,6 +66,34 @@ pub struct MetricsSnapshot {
     pub scenario_created: u64,
     pub scenario_retired: u64,
     pub scenario_active_peak: u64,
+}
+
+impl MetricsSnapshot {
+    pub fn to_json_line(&self, label: &str, elapsed: Option<Duration>) -> String {
+        #[derive(Serialize)]
+        struct Snapshot<'a> {
+            label: &'a str,
+            base_events: u64,
+            predicted_events: u64,
+            scenario_alerts: u64,
+            scenario_created: u64,
+            scenario_retired: u64,
+            scenario_active_peak: u64,
+            elapsed_ms: Option<u128>,
+        }
+
+        let payload = Snapshot {
+            label,
+            base_events: self.base_events,
+            predicted_events: self.predicted_events,
+            scenario_alerts: self.scenario_alerts,
+            scenario_created: self.scenario_created,
+            scenario_retired: self.scenario_retired,
+            scenario_active_peak: self.scenario_active_peak,
+            elapsed_ms: elapsed.map(|d| d.as_millis()),
+        };
+        serde_json::to_string(&payload).unwrap_or_else(|_| String::from("{}"))
+    }
 }
 
 pub struct EpochTimer {
@@ -79,4 +109,3 @@ impl EpochTimer {
         self.start.elapsed()
     }
 }
-
