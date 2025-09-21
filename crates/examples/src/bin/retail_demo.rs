@@ -1,7 +1,8 @@
 use anyhow::Result;
+use clap::Parser;
 use tracing::info;
-use tw_runtime::{init_tracing, start_runtime};
 use tw_runtime::metrics::{EpochTimer, MetricsRegistry};
+use tw_runtime::{init_tracing, start_runtime};
 
 use differential_dataflow::input::InputSession;
 use differential_dataflow::operators::reduce::Reduce;
@@ -15,10 +16,49 @@ use tw_core::{EventEnvelope, EventMeta};
 use tw_predictors::SpendGrowthPredictor;
 use tw_scenarios::retail::{RetailBeamConfig, RetailScenarioManager};
 
+#[derive(Parser, Debug)]
+#[command(name = "retail_demo", about = "Retail branching futures demo with configurable parameters")]
+struct RetailOpts {
+    #[arg(long, default_value_t = 5)]
+    top_k: usize,
+    #[arg(long, default_value_t = 50)]
+    customers: u64,
+    #[arg(long, default_value_t = 10)]
+    batches: u64,
+    #[arg(long, default_value_t = 200)]
+    batch_size: u64,
+    #[arg(long, default_value_t = 5)]
+    max_depth: u32,
+    #[arg(long, default_value_t = 32)]
+    beam_width: usize,
+    #[arg(long, default_value_t = 0.1)]
+    min_prob: f64,
+    #[arg(long, default_value_t = 0.5)]
+    branch_prob: f64,
+    #[arg(long, default_value_t = 0.3)]
+    delta_multiplier: f64,
+    #[arg(long, default_value_t = 3_000)]
+    min_delta_cents: i64,
+    #[arg(long, default_value_t = 7)]
+    target_customer: u64,
+    #[arg(long, default_value_t = 0.2)]
+    prob_threshold: f64,
+}
+
 fn main() -> Result<()> {
     init_tracing();
     info!("retail_demo starting");
-    start_runtime(1, |_index, worker| {
+    let opts = RetailOpts::parse();
+    info!(?opts, "retail opts");
+    let beam_cfg = RetailBeamConfig {
+        max_depth: opts.max_depth,
+        beam_width: opts.beam_width,
+        min_prob: opts.min_prob,
+        branch_prob: opts.branch_prob,
+        delta_multiplier: opts.delta_multiplier,
+        min_delta_cents: opts.min_delta_cents,
+    };
+    start_runtime(1, move |_index, worker| {
         info!("retail_demo worker running");
 
         // Input for typed OrderPlaced events (base world)
@@ -30,13 +70,15 @@ fn main() -> Result<()> {
         let mut probe = ProbeHandle::new();
 
         let predictor = Arc::new(SpendGrowthPredictor::default());
-        let mut scenario_manager = RetailScenarioManager::new(RetailBeamConfig::default(), predictor);
+        let mut scenario_manager = RetailScenarioManager::new(beam_cfg.clone(), predictor);
         let metrics = MetricsRegistry::default();
 
         // Build dataflow: per-customer totals and global top-K
-        const TOP_K: usize = 5;
+        let top_k = opts.top_k;
+        let prob_threshold = opts.prob_threshold;
+        let target_customer = opts.target_customer;
         let metrics_for_dataflow = metrics.clone();
-        worker.dataflow::<u64, _, _>(|scope| {
+        worker.dataflow::<u64, _, _>(move |scope| {
             let orders = input.to_collection(scope);
 
             // Map typed orders to (customer_id, amount_cents)
@@ -63,7 +105,7 @@ fn main() -> Result<()> {
                         inputs.iter().map(|(v, c)| (*v, *c)).collect();
                     // Sort by sum descending
                     vals.sort_by(|a, b| b.0 .0.cmp(&a.0 .0));
-                    for i in 0..TOP_K.min(vals.len()) {
+                    for i in 0..top_k.min(vals.len()) {
                         output.push((vals[i].0, 1));
                     }
                 });
@@ -125,7 +167,7 @@ fn main() -> Result<()> {
                     let mut vals: Vec<((i64, u64), isize)> =
                         inputs.iter().map(|(v, c)| (*v, *c)).collect();
                     vals.sort_by(|a, b| b.0 .0.cmp(&a.0 .0));
-                    for i in 0..TOP_K.min(vals.len()) {
+                    for i in 0..top_k.min(vals.len()) {
                         output.push((vals[i].0, 1));
                     }
                 });
@@ -133,13 +175,11 @@ fn main() -> Result<()> {
             scenario_topk.inspect(|x| info!(?x, "scenario_topk update"));
 
             // Subscription: target customer enters top-K in any scenario with prob >= p_min
-            let p_min = 0.2f64;
-            let target_customer: u64 = 7;
             let alerts = scenario_topk
                 .map(|(sid, (sum, cust))| (sid, (cust, sum)))
                 .filter(move |(_sid, (cust, _sum))| *cust == target_customer)
                 .join(&scen_weights)
-                .filter(move |(_sid, ((_cust, _sum), prob))| *prob >= p_min)
+                .filter(move |(_sid, ((_cust, _sum), prob))| *prob >= prob_threshold)
                 .map(|(sid, ((cust, sum), prob))| (sid, cust, sum, prob));
 
             let metrics_alerts = metrics_for_dataflow.clone();
@@ -151,13 +191,13 @@ fn main() -> Result<()> {
                 .probe_with(&mut probe);
         });
 
-        // Synthetic generator: 50 customers, deterministic pattern (typed events)
+        // Synthetic generator
         let mut epoch: u64 = 0;
-        let customers = 50u64;
-        for batch in 0..10u64 {
+        let customers = opts.customers;
+        for batch in 0..opts.batches {
             let epoch_timer = EpochTimer::start();
             let completed_epoch = epoch;
-            for i in 0..200u64 {
+            for i in 0..opts.batch_size {
                 // Spread spend across customers with some skew
                 let cust = (batch * 13 + i * 7) % customers;
                 let base: i64 = 1000 + ((i % 10) as i64) * 250; // cents

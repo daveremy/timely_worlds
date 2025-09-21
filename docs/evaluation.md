@@ -32,9 +32,9 @@ Reporting
 - Alert precision/recall over runs (requires synthetic truth logs).
 
 Collection Workflow
-1. Run the demo with desired parameters (see `scripts/run_retail_demo.sh`, `scripts/run_mfg_demo.sh` once added) and capture stdout to a JSONL file.
-2. Use `jq` or a Python notebook to filter on `metrics_json` logs and compute aggregates.
-3. Repeat for varying beam width (K) and depth (D), then chart metrics.
+1. Run the demos with desired parameters (`scripts/run_retail_demo.sh --help`, `scripts/run_mfg_demo.sh --help`) and redirect stdout to JSONL.
+2. Use `jq` or a Python notebook to filter lines whose `metrics_json` payload has `label` (`retail_epoch`, `mfg_epoch`, etc.) and compute aggregates.
+3. Sweep beam width (K), max depth (D), branch probability, and workload size using CLI flags; chart latency/throughput vs. configuration.
 
 Targets (MVP)
 - Sub‑second p95 per update at moderate rates (O(1–5K)/s) on a single machine.

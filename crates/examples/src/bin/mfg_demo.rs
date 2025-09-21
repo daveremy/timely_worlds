@@ -1,7 +1,8 @@
 use anyhow::Result;
+use clap::Parser;
 use tracing::info;
-use tw_runtime::{init_tracing, start_runtime};
 use tw_runtime::metrics::{EpochTimer, MetricsRegistry};
+use tw_runtime::{init_tracing, start_runtime};
 
 use differential_dataflow::input::InputSession;
 use differential_dataflow::operators::reduce::Reduce;
@@ -17,6 +18,35 @@ use tw_scenarios::manufacturing::{
     ManufacturingBeamConfig, ManufacturingScenarioDelta, ManufacturingScenarioManager,
 };
 
+#[derive(Parser, Debug)]
+#[command(name = "mfg_demo", about = "Manufacturing branching futures demo with configurable parameters")]
+struct ManufacturingOpts {
+    #[arg(long, default_value_t = 3)]
+    top_k: usize,
+    #[arg(long, default_value_t = 8)]
+    machines: u64,
+    #[arg(long, default_value_t = 12)]
+    batches: u64,
+    #[arg(long = "ops-per-batch", default_value_t = 120)]
+    ops_per_batch: u64,
+    #[arg(long, default_value_t = 4)]
+    max_depth: u32,
+    #[arg(long, default_value_t = 16)]
+    beam_width: usize,
+    #[arg(long, default_value_t = 0.1)]
+    min_prob: f64,
+    #[arg(long, default_value_t = 0.45)]
+    branch_prob: f64,
+    #[arg(long, default_value_t = 0.5)]
+    delta_multiplier: f64,
+    #[arg(long, default_value_t = 2)]
+    min_delta_units: i64,
+    #[arg(long, default_value_t = 6)]
+    backlog_threshold: i64,
+    #[arg(long, default_value_t = 0.3)]
+    prob_threshold: f64,
+}
+
 #[derive(Debug, Clone)]
 struct ActiveJob {
     job_id: u64,
@@ -27,7 +57,17 @@ struct ActiveJob {
 fn main() -> Result<()> {
     init_tracing();
     info!("mfg_demo starting");
-    start_runtime(1, |_index, worker| {
+    let opts = ManufacturingOpts::parse();
+    info!(?opts, "mfg opts");
+    let beam_cfg = ManufacturingBeamConfig {
+        max_depth: opts.max_depth,
+        beam_width: opts.beam_width,
+        min_prob: opts.min_prob,
+        branch_prob: opts.branch_prob,
+        delta_multiplier: opts.delta_multiplier,
+        min_delta_units: opts.min_delta_units,
+    };
+    start_runtime(1, move |_index, worker| {
         info!("mfg_demo worker running");
 
         let mut input: InputSession<_, EventEnvelope<ManufacturingEvent>, isize> = InputSession::new();
@@ -37,14 +77,16 @@ fn main() -> Result<()> {
 
         let predictor = Arc::new(QueueGrowthPredictor::default());
         let mut scenario_manager = ManufacturingScenarioManager::new(
-            ManufacturingBeamConfig::default(),
+            beam_cfg.clone(),
             predictor,
         );
         let metrics = MetricsRegistry::default();
 
-        const TOP_K: usize = 3;
+        let top_k = opts.top_k;
+        let backlog_threshold = opts.backlog_threshold;
+        let prob_threshold = opts.prob_threshold;
         let metrics_for_dataflow = metrics.clone();
-        worker.dataflow::<u64, _, _>(|scope| {
+        worker.dataflow::<u64, _, _>(move |scope| {
             let events = input.to_collection(scope);
 
             // Map events to machine backlog deltas
@@ -70,7 +112,7 @@ fn main() -> Result<()> {
                     let mut vals: Vec<((i64, u64), isize)> =
                         inputs.iter().map(|(val, cnt)| (*val, *cnt)).collect();
                     vals.sort_by(|a, b| b.0 .0.cmp(&a.0 .0));
-                    for i in 0..TOP_K.min(vals.len()) {
+                    for i in 0..top_k.min(vals.len()) {
                         output.push((vals[i].0, 1));
                     }
                 });
@@ -123,18 +165,18 @@ fn main() -> Result<()> {
                     let mut vals: Vec<((i64, u64), isize)> =
                         inputs.iter().map(|(val, cnt)| (*val, *cnt)).collect();
                     vals.sort_by(|a, b| b.0 .0.cmp(&a.0 .0));
-                    for i in 0..TOP_K.min(vals.len()) {
+                    for i in 0..top_k.min(vals.len()) {
                         output.push((vals[i].0, 1));
                     }
                 });
 
             scenario_topk.inspect(|x| info!(?x, "scenario top machines"));
 
-            let target_threshold = 6i64;
             let alerts = scenario_topk
                 .map(|(sid, (sum, machine))| (sid, (machine, sum)))
                 .join(&scen_weights)
-                .filter(move |(_sid, ((machine, sum), prob))| *sum >= target_threshold && *prob >= 0.3)
+                .filter(move |(_sid, ((machine, sum), prob))| *sum >= backlog_threshold
+                    && *prob >= prob_threshold)
                 .map(|(sid, ((machine, sum), prob))| (sid, machine, sum, prob));
 
             let metrics_alerts = metrics_for_dataflow.clone();
@@ -148,14 +190,14 @@ fn main() -> Result<()> {
 
         // Synthetic generator
         let mut epoch: u64 = 0;
-        let machines = 8u64;
+        let machines = opts.machines;
         let mut job_counter: u64 = 0;
         let mut active_jobs: Vec<ActiveJob> = Vec::new();
 
-        for batch in 0..12u64 {
+        for batch in 0..opts.batches {
             let epoch_timer = EpochTimer::start();
             let completed_epoch = epoch;
-            for i in 0..120u64 {
+            for i in 0..opts.ops_per_batch {
                 job_counter += 1;
                 let machine = (batch * 5 + i * 11) % machines;
                 let duration_ms = 3_000 + (machine * 250) + ((i % 5) as u64) * 500;

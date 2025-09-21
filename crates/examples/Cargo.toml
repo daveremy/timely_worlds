@@ -21,3 +21,4 @@ tw-runtime = { path = "../runtime" }
 tw-views = { path = "../views" }
 tw-predictors = { path = "../predictors" }
 tw-scenarios = { path = "../scenarios" }
+clap = { workspace = true }
