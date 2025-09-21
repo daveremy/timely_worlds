@@ -15,6 +15,7 @@ Running Demos
 - Manufacturing: `scripts/run_mfg_demo.sh --ops-per-batch 150 --beam-width 24 --backlog-threshold 8 > mfg_metrics.jsonl`
 - All demos accept `--help` for full parameter lists; logs emit JSON (`metrics_json`) per epoch and a final summary for evaluation.
 - Summaries: `scripts/summarize_metrics.py retail_metrics.jsonl --pretty`
+- Sweeps: `scripts/sweep_retail.sh metrics/retail` and `scripts/sweep_mfg.sh metrics/mfg` (edit arrays inside to adjust).
 
 Workspace Layout
 - `crates/core`: core types and traits (events, diffs, ids)
