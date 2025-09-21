@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tw_core::retail::{OrderLine, OrderPlaced};
 use tw_core::{EventEnvelope, EventMeta};
 use tw_predictors::SpendGrowthPredictor;
-use tw_scenarios::{BeamConfig, ScenarioManager};
+use tw_scenarios::retail::{RetailBeamConfig, RetailScenarioManager};
 
 fn main() -> Result<()> {
     init_tracing();
@@ -29,7 +29,7 @@ fn main() -> Result<()> {
         let mut probe = ProbeHandle::new();
 
         let predictor = Arc::new(SpendGrowthPredictor::default());
-        let mut scenario_manager = ScenarioManager::new(BeamConfig::default(), predictor);
+        let mut scenario_manager = RetailScenarioManager::new(RetailBeamConfig::default(), predictor);
 
         // Build dataflow: per-customer totals and global top-K
         const TOP_K: usize = 5;

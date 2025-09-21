@@ -46,4 +46,4 @@ pub enum CoreError {
 }
 
 pub mod retail;
-
+pub mod manufacturing;

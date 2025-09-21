@@ -4,6 +4,7 @@ use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
 use tw-core::{Depth, EventEnvelope, Predicted, Prob, ScenarioId};
 
+use tw_core::manufacturing::OperationStart;
 use tw_core::retail::OrderPlaced;
 
 /// A predictor consumes view changes and produces candidate future events for expansion.
@@ -64,5 +65,29 @@ impl SpendDeltaPredictor for SpendGrowthPredictor {
         let base = order.total_cents().max(1);
         let uplift = ((base as f64) * self.uplift_ratio).round() as i64;
         std::cmp::max(uplift, self.min_delta_cents)
+    }
+}
+
+pub trait MachineBacklogPredictor: Send + Sync + 'static {
+    fn predict_backlog(&self, op: &OperationStart) -> i64;
+}
+
+pub struct QueueGrowthPredictor {
+    pub base_units: i64,
+    pub duration_multiplier: f64,
+    pub min_delta_units: i64,
+}
+
+impl Default for QueueGrowthPredictor {
+    fn default() -> Self {
+        Self { base_units: 1, duration_multiplier: 0.001, min_delta_units: 2 }
+    }
+}
+
+impl MachineBacklogPredictor for QueueGrowthPredictor {
+    fn predict_backlog(&self, op: &OperationStart) -> i64 {
+        let duration_component = ((op.expected_duration_ms as f64) * self.duration_multiplier).round() as i64;
+        let estimate = self.base_units + duration_component;
+        std::cmp::max(estimate, self.min_delta_units)
     }
 }
