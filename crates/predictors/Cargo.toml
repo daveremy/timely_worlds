@@ -1,0 +1,10 @@
+[package]
+name = "tw-predictors"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+serde = { workspace = true }
+tw-core = { path = "../core" }
+

@@ -1,0 +1,12 @@
+[package]
+name = "tw-views"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = { workspace = true }
+timely = { workspace = true }
+differential-dataflow = { workspace = true }
+serde = { workspace = true }
+tw-core = { path = "../core" }
+

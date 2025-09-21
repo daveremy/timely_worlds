@@ -1,0 +1,23 @@
+[package]
+name = "tw-examples"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "retail_demo"
+path = "src/bin/retail_demo.rs"
+
+[[bin]]
+name = "mfg_demo"
+path = "src/bin/mfg_demo.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+tracing = { workspace = true }
+timely = { workspace = true }
+differential-dataflow = { workspace = true }
+tw-core = { path = "../core" }
+tw-runtime = { path = "../runtime" }
+tw-views = { path = "../views" }
+tw-predictors = { path = "../predictors" }
+tw-scenarios = { path = "../scenarios" }
