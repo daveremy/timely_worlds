@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import csv
 import json
 import sys
 from collections import defaultdict
@@ -25,17 +26,21 @@ def parse_line(line):
 
 
 def load_metrics(paths):
-    metrics = []
     if not paths:
         paths = ["-"]
+    bundles = []
     for path in paths:
+        if path == "-" and len(paths) > 1:
+            raise ValueError("stdin ('-') cannot be combined with other paths")
         handle = sys.stdin if path == "-" else open(path, "r", encoding="utf-8")
+        metrics = []
         with handle:
             for line in handle:
                 data = parse_line(line)
                 if data is not None and "label" in data:
                     metrics.append(data)
-    return metrics
+        bundles.append((path, metrics))
+    return bundles
 
 
 def summarize(metrics):
@@ -74,21 +79,90 @@ def summarize(metrics):
     return results
 
 
+def write_csv(rows, dest):
+    fieldnames = [
+        "file",
+        "label",
+        "count",
+        "base_events",
+        "predicted_events",
+        "scenario_created",
+        "scenario_retired",
+        "scenario_alerts",
+        "scenario_active_peak",
+        "avg_elapsed_ms",
+        "avg_base_throughput_per_sec",
+    ]
+    writer = csv.DictWriter(dest, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Summarize Timely Worlds metrics JSON lines.")
     parser.add_argument("paths", nargs="*", help="Files to parse (defaults to stdin if none).")
-    parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+    parser.add_argument("--pretty", action="store_true", help="Pretty-print JSON output (JSON mode only).")
+    parser.add_argument(
+        "--per-file",
+        action="store_true",
+        help="Summarize metrics separately for each input file.",
+    )
+    parser.add_argument(
+        "--csv",
+        action="store_true",
+        help="Output CSV instead of JSON (implies --per-file).",
+    )
     args = parser.parse_args()
 
-    metrics = load_metrics(args.paths)
-    if not metrics:
-        print("{}", end="\n")
-        return
-    summary = summarize(metrics)
-    if args.pretty:
-        json.dump(summary, sys.stdout, indent=2)
+    if args.csv:
+        args.per_file = True
+
+    bundles = load_metrics(args.paths)
+
+    if args.per_file:
+        rows = []
+        summaries = {}
+        for path, metrics in bundles:
+            if not metrics:
+                continue
+            summary = summarize(metrics)
+            summaries[path] = summary
+            for label, stats in summary.items():
+                row = {
+                    "file": path,
+                    "label": label,
+                    "count": stats.get("count", 0),
+                    "base_events": stats.get("base_events", 0),
+                    "predicted_events": stats.get("predicted_events", 0),
+                    "scenario_created": stats.get("scenario_created", 0),
+                    "scenario_retired": stats.get("scenario_retired", 0),
+                    "scenario_alerts": stats.get("scenario_alerts", 0),
+                    "scenario_active_peak": stats.get("scenario_active_peak", 0),
+                    "avg_elapsed_ms": stats.get("avg_elapsed_ms"),
+                    "avg_base_throughput_per_sec": stats.get("avg_base_throughput_per_sec"),
+                }
+                rows.append(row)
+        if args.csv:
+            write_csv(rows, sys.stdout)
+        else:
+            if args.pretty:
+                json.dump(summaries, sys.stdout, indent=2)
+            else:
+                json.dump(summaries, sys.stdout)
+            sys.stdout.write("\n")
     else:
-        json.dump(summary, sys.stdout)
-    sys.stdout.write("\n")
+        merged = []
+        for _path, metrics in bundles:
+            merged.extend(metrics)
+        if not merged:
+            print("{}", end="\n")
+            return
+        summary = summarize(merged)
+        if args.pretty:
+            json.dump(summary, sys.stdout, indent=2)
+        else:
+            json.dump(summary, sys.stdout)
+        sys.stdout.write("\n")
 if __name__ == "__main__":
     main()

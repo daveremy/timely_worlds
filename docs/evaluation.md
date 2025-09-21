@@ -33,7 +33,7 @@ Reporting
 
 Collection Workflow
 1. Run the demos with desired parameters (`scripts/run_retail_demo.sh --help`, `scripts/run_mfg_demo.sh --help`) and redirect stdout to JSONL.
-2. Summarize metrics with `scripts/summarize_metrics.py retail_metrics.jsonl --pretty` (supports multiple files and stdin).
+2. Summarize metrics with `scripts/summarize_metrics.py retail_metrics.jsonl --pretty` (supports multiple files, stdin, `--per-file`, and CSV output via `--csv`).
 3. Use `jq`/Python notebooks for deeper analysis: filter by `label` (`retail_epoch`, `mfg_epoch`, etc.) and compute aggregates such as throughput, alert counts, and scenario churn.
 4. Sweep beam width (K), max depth (D), branch probability, and workload size using CLI flags; chart latency/throughput vs. configuration.
 
