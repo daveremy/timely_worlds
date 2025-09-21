@@ -5,9 +5,14 @@ use tw_runtime::{init_tracing, start_runtime};
 use differential_dataflow::input::InputSession;
 use differential_dataflow::operators::reduce::Reduce;
 use timely::dataflow::operators::probe::{Handle as ProbeHandle, Probe};
+use timely::dataflow::operators::{Inspect, Map};
+
+use std::sync::Arc;
 
 use tw_core::retail::{OrderLine, OrderPlaced};
 use tw_core::{EventEnvelope, EventMeta};
+use tw_predictors::SpendGrowthPredictor;
+use tw_scenarios::{BeamConfig, ScenarioManager};
 
 fn main() -> Result<()> {
     init_tracing();
@@ -22,6 +27,9 @@ fn main() -> Result<()> {
         // Scenario weights: (scenario_id, probability)
         let mut scen_weight_input: InputSession<_, (u64, f64), isize> = InputSession::new();
         let mut probe = ProbeHandle::new();
+
+        let predictor = Arc::new(SpendGrowthPredictor::default());
+        let mut scenario_manager = ScenarioManager::new(BeamConfig::default(), predictor);
 
         // Build dataflow: per-customer totals and global top-K
         const TOP_K: usize = 5;
@@ -139,7 +147,6 @@ fn main() -> Result<()> {
         // Synthetic generator: 50 customers, deterministic pattern (typed events)
         let mut epoch: u64 = 0;
         let customers = 50u64;
-        let scenarios = [1u64, 2, 3];
         for batch in 0..10u64 {
             for i in 0..200u64 {
                 // Spread spend across customers with some skew
@@ -153,6 +160,7 @@ fn main() -> Result<()> {
                     lines: vec![OrderLine { sku_id: (i % 100) as u64, qty: 1, price_cents: amount }],
                     ts_ms: epoch * 1000,
                 };
+                let outcome = scenario_manager.expand_order(&order);
                 let env = EventEnvelope {
                     meta: EventMeta {
                         domain: "retail".to_string(),
@@ -165,13 +173,21 @@ fn main() -> Result<()> {
                 };
                 input.insert(env);
 
-                // Predicted overlays: add +3000 cents to scenario buckets by customer hash
-                let sid = scenarios[(cust as usize % scenarios.len())];
-                let delta = 3000i64;
-                pred_input.insert((sid, cust, delta));
-                // Scenario weights
-                let prob = match sid { 1 => 0.6, 2 => 0.4, _ => 0.2 };
-                scen_weight_input.insert((sid, prob));
+                for meta in &outcome.created {
+                    scen_weight_input.insert((meta.id, meta.weight.0));
+                }
+
+                for delta in &outcome.overlays_added {
+                    pred_input.insert((delta.scenario_id, delta.customer_id, delta.delta_cents));
+                }
+
+                for delta in &outcome.overlays_removed {
+                    pred_input.remove((delta.scenario_id, delta.customer_id, delta.delta_cents));
+                }
+
+                for meta in &outcome.retired {
+                    scen_weight_input.remove((meta.id, meta.weight.0));
+                }
             }
             epoch += 1;
             input.advance_to(epoch);
